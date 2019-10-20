@@ -11,10 +11,15 @@ do
 key="$1"
 
 case $key in
+    --no-bitcoind)
+    BITCOIND="n"
+    shift
+    ;;
     -a|--advanced)
     ADVANCED="y"
     shift
     ;;
+
     -n|--normal)
     ADVANCED="n"
     FAIL2BAN="y"
@@ -89,6 +94,7 @@ Vulcano Masternode installer arguments:
     -u --ufw                  : Install UFW
     --no-ufw                  : Do not install UFW
     -b --bootstrap            : Sync node using Bootstrap
+    --no-bitcoind             : Do not Install bitcoind
     --no-bootstrap            : Do not use Bootstrap
     -h --help                 : Display this help text.
     --no-interaction          : Do not wait for wallet activation.
@@ -115,9 +121,9 @@ clear
 
 # These should automatically find the latest version of Vulcano
 
-TARBALLURL=$(curl -s https://api.github.com/repos/vulcanocrypto/vulcano/releases/latest | grep browser_download_url | grep -e "vulcano-node.*linux64" | cut -d '"' -f 4)
-TARBALLNAME=$(curl -s https://api.github.com/repos/vulcanocrypto/vulcano/releases/latest | grep browser_download_url | grep -e "vulcano-node.*linux64" | cut -d '"' -f 4 | cut -d "/" -f 9)
-BOOTSTRAPURL=$(curl -s https://api.github.com/repos/vulcanocrypto/vulcano/releases/latest | grep bootstrap.dat.xz | grep browser_download_url | cut -d '"' -f 4)
+TARBALLURL=$(curl -s https://api.github.com/repos/quoxent/vulcano/releases/latest | grep browser_download_url | grep -e "vulcano-node.*linux64" | cut -d '"' -f 4)
+TARBALLNAME=$(curl -s https://api.github.com/repos/quoxent/vulcano/releases/latest | grep browser_download_url | grep -e "vulcano-node.*linux64" | cut -d '"' -f 4 | cut -d "/" -f 9)
+BOOTSTRAPURL=$(curl -s https://api.github.com/repos/quoxent/vulcano/releases/latest | grep bootstrap.dat.xz | grep browser_download_url | cut -d '"' -f 4)
 BOOTSTRAPARCHIVE="bootstrap.dat.xz"
 I2PBINURL="https://github.com/kewagi/kovri/releases/download/v0.1.0-alpha/kovri-0.1.0-alpha.tar.gz"
 I2PBINARCHIVE="kovri-0.1.0-alpha.tar.gz"
@@ -202,6 +208,10 @@ sleep 1
 else
 
 USER=root
+
+if [ -z "$BITCOIND" ]; then
+  BITCOIND="y"
+fi
 
 if [ -z "$FAIL2BAN" ]; then
   FAIL2BAN="y"
@@ -297,8 +307,37 @@ apt-get -qq update
 apt-get -qq upgrade
 apt-get -qq autoremove
 apt-get -qq install wget htop xz-utils
-apt-get -qq install build-essential && apt-get -qq install libtool autotools-dev autoconf automake && apt-get -qq install libssl-dev && apt-get -qq install libboost-all-dev && apt-get -qq install software-properties-common && add-apt-repository -y ppa:bitcoin/bitcoin && apt update && apt-get -qq install libdb4.8-dev && apt-get -qq install libdb4.8++-dev && apt-get -qq install libminiupnpc-dev && apt-get -qq install libqt4-dev libprotobuf-dev protobuf-compiler && apt-get -qq install libqrencode-dev && apt-get -qq install git && apt-get -qq install pkg-config && apt-get -qq install libzmq3-dev
+apt-get -qq install build-essential && apt-get -qq install libtool autotools-dev autoconf automake && apt-get -qq install libssl-dev && apt-get -qq install libboost-all-dev && apt-get -qq install libdb4.8-dev && apt-get -qq install libdb4.8++-dev && apt-get -qq install libminiupnpc-dev && apt-get -qq install libqt4-dev libprotobuf-dev protobuf-compiler && apt-get -qq install libqrencode-dev && apt-get -qq install git && apt-get -qq install pkg-config && apt-get -qq install libzmq3-dev
 apt-get -qq install aptitude
+# Install bitcoind
+if [ "$BITCOIND" == "y" ]; then
+  echo "Installing bitcoin core over snap"
+  snap install bitcoin-core
+fi
+#Set up bitcoin
+if [ ! -f /etc/systemd/system/bitcoind.service ]; then
+  cat > /etc/systemd/system/bitcoind.service << EOL
+[Unit]
+Description=Bitcoin daemon
+After=network.target
+
+[Service]
+User=root
+Group=root
+Type=forking
+PIDFile=/root/.bitcoin/bitcoind.pid
+ExecStart=/snap/bin/bitcoin-core.daemon -pid=/root/.bitcoin/bitcoind.pid
+KillMode=process
+Restart=always
+TimeoutSec=120
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
+EOL
+  mkdir /root/.bitcoin
+  systemctl enable --now bitcoind
+fi
 
 # Install Fail2Ban
 if [[ ("$FAIL2BAN" == "y" || "$FAIL2BAN" == "Y" || "$FAIL2BAN" == "") ]]; then
@@ -404,7 +443,7 @@ if [[ ("$BOOTSTRAP" == "y" || "$BOOTSTRAP" == "Y" || "$BOOTSTRAP" == "") ]]; the
 fi
 
 # Install peers.dat - Can be removed after seeder issue is resolved
-#wget https://github.com/VulcanoCrypto/Vulcano/releases/download/2.1.0.0/peers.dat.xz && xz -cd peers.dat.xz > $USERHOME/.vulcanocore/peers.dat && rm peers.dat.xz
+wget https://github.com/Quoxent/Vulcano/releases/download/2.1.0.0/peers.dat.xz && xz -cd peers.dat.xz > $USERHOME/.vulcanocore/peers.dat && rm peers.dat.xz
 
 # Create vulcano.conf
 touch "$USERHOME/.vulcanocore/vulcano.conf"
@@ -512,12 +551,12 @@ if ! systemctl status vulcanod | grep -q "active (running)"; then
 fi
 
 echo "Installing Vulcano Autoupdater..."
-rm -f /usr/local/bin/vulcanoupdate
-curl -o /usr/local/bin/vulcanoupdate https://raw.githubusercontent.com/vulcanocrypto/Vulcano-MN-Install/master/vulcanoupdate
-chmod a+x /usr/local/bin/vulcanoupdate
+rm -f /usr/local/bin/quoxentupdate
+curl -o /usr/local/bin/quoxentupdate https://raw.githubusercontent.com/quoxent/Quoxent-MN-Install/master/quoxentupdate
+chmod a+x /usr/local/bin/quoxentupdate
 
-if [ ! -f /etc/systemd/system/vulcanoupdate.service ]; then
-cat > /etc/systemd/system/vulcanoupdate.service << EOL
+if [ ! -f /etc/systemd/system/quoxentupdate.service ]; then
+cat > /etc/systemd/system/quoxentupdate.service << EOL
 [Unit]
 Description=Vulcanos's Masternode Autoupdater
 After=network-online.target
@@ -525,12 +564,12 @@ After=network-online.target
 Type=oneshot
 User=root
 WorkingDirectory=${USERHOME}
-ExecStart=/usr/local/bin/vulcanoupdate
+ExecStart=/usr/local/bin/quoxentupdate
 EOL
 fi
 
-if [ ! -f /etc/systemd/system/vulcanoupdate.timer ]; then
-cat > /etc/systemd/system/vulcanoupdate.timer << EOL
+if [ ! -f /etc/systemd/system/quoxentupdate.timer ]; then
+cat > /etc/systemd/system/quoxentupdate.timer << EOL
 [Unit]
 Description=Vulcanos's Masternode Autoupdater Timer
 
@@ -543,8 +582,8 @@ WantedBy=timers.target
 EOL
 fi
 
-systemctl enable vulcanoupdate.timer
-systemctl start vulcanoupdate.timer
+systemctl enable quoxentupdate.timer
+systemctl start quoxentupdate.timer
 
 echo "Waiting for wallet to load..."
 until su -c "vulcano-cli getinfo 2>/dev/null | grep -q \"version\"" $USER; do
